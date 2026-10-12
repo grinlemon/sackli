@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+/* Tokens — source unique de la palette. */
+@theme {
+  --color-bg: #f7f8f7;
+  --color-fg: #1c1f1d;
+  --color-muted: #6b716e;
+  --color-line: #e1e5e3;
+  --color-panel: #ffffff;
+
+  --color-green: #3ecf8e;
+  --color-deep: #16734e;
+  --color-pale: #e9faf3;
+  --color-danger: #a1453f;
+
+  /* Segments du flow bar / de la répartition */
+  --color-seg-common: #77d8ab;
+  --color-seg-a: #d7eee5;
+  --color-seg-b: #b9c6c0;
+  --color-seg-rest: #3ecf8e;
+
+  /* Teintes des membres dans la barre de répartition. `--color-seg-a` et `-b`
+     étaient trop proches l'une de l'autre pour distinguer deux segments
+     voisins ; elles restent pour les rubans clairs du diagramme de flux. */
+  --color-member-a: #3f7f6b;
+  --color-member-b: #93b9a9;
+
+  /* Fraunces pour les titres et les montants mis en avant, Inter pour tout le
+     reste. Les secours gardent la même famille de forme le temps du chargement. */
+  --font-serif: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-card: 6px;
+  --radius-control: 5px;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 13px;
+  }
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+  /* Sur un téléphone, Safari zoome sur tout champ écrit sous 16px dès qu'on le
+     touche, et ne dézoome pas en sortant : la page reste décalée. */
+  @media (max-width: 639.98px) {
+    input:not([type='checkbox'], [type='radio'], [type='range']),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+  /* Le flash gris d'iOS sur chaque toucher ; les boutons ont leur propre état actif. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  /* Les flèches natives des champs number sont trop étroites pour la grille
+     et volent la place du chiffre — la saisie reste clavier. */
+  input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Apparition au défilement (landing) : l'attribut n'est posé que par l'action
+   `reveal`, donc jamais sans JS ni pour qui a demandé moins d'animations. */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0ms),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0ms);
+}
+[data-reveal='in'] {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@keyframes drift {
+  50% {
+    transform: translate(-6%, 8%) scale(1.08);
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+/* Entrée du hero : en CSS pur, donc jouée dès le rendu serveur. */
+@utility rise {
+  animation: rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* L'impression compose une A4 paysage : c'est la largeur qu'il faut au
+   diagramme de flux et au tableau des lignes. La route d'export rend son
+   document à cette taille exacte, marges déduites (voir PAGE_W). */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+  html {
+    background: #fff;
+  }
+}

@@ -1,0 +1,14 @@
+node_modules
+.svelte-kit
+.vercel
+build
+.env
+.env.*
+!.env.example
+LINKEDIN.md
+
+# Jeu de données de dev personnel (voir supabase/seed.example.sql)
+supabase/seed.sql
+
+# macOS
+.DS_Store
