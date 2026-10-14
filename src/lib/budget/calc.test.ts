@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetMember, Transaction } from '$lib/types';
 import {
+  appliedCommonWeights,
+  balanceSpread,
+  detectBalanceChoice,
+  type BalanceMode,
   balancedCommonWeights,
   commonTotal,
   householdSummary,
@@ -327,6 +331,100 @@ describe('équilibrage de la charge commune', () => {
     const sansCommun = [tx({ id: 'a', kind: 'income', amount: 5000, member_id: 'g' })];
     expect(commonTotal(sansCommun)).toBe(0);
     expect([...balancedCommonWeights(sansCommun, members).values()]).toEqual([50, 50]);
+  });
+
+  it('sans règle précisée, égalise le reste final', () => {
+    expect(balancedCommonWeights(budget, members)).toEqual(
+      balancedCommonWeights(budget, members, 'total')
+    );
+  });
+
+  describe('règle « même reste après le commun »', () => {
+    it('égalise le reste avant le personnel', () => {
+      // Revenus 6000 et 4000, commun 2000 : (10000 − 2000) / 2 = 4000 chacun.
+      const rows = simulateCommonSplit(budget, members, balancedCommonWeights(budget, members, 'common'));
+      expect(rows[0].afterCommon).toBeCloseTo(4000, 8);
+      expect(rows[1].afterCommon).toBeCloseTo(4000, 8);
+      expect(rows[0].common).toBeCloseTo(2000, 8);
+      expect(rows[1].common).toBeCloseTo(0, 8);
+      // Le personnel vient ensuite, chacun le sien.
+      expect(rows[0].remaining).toBeCloseTo(3200, 8);
+      expect(rows[1].remaining).toBeCloseTo(3800, 8);
+      expect(balanceSpread(rows, 'common')).toBeCloseTo(0, 8);
+    });
+
+    it('ignore les dépenses personnelles', () => {
+      const plusDePerso = budget.map((t) => (t.id === 'p2' ? { ...t, amount: 1500 } : t));
+      expect(balancedCommonWeights(plusDePerso, members, 'common')).toEqual(
+        balancedCommonWeights(budget, members, 'common')
+      );
+    });
+
+    it('ne fait jamais payer une part négative', () => {
+      const desequilibre = [
+        tx({ id: 'a', kind: 'income', amount: 9000, member_id: 'g' }),
+        tx({ id: 'b', kind: 'income', amount: 100, member_id: 'i' }),
+        tx({ id: 'c', amount: 2000, member_id: null })
+      ];
+      const weights = balancedCommonWeights(desequilibre, members, 'common');
+      expect(weights.get('i')).toBe(0);
+      expect(weights.get('g')).toBeCloseTo(100, 8);
+    });
+  });
+
+  describe('règle « au prorata des revenus »', () => {
+    it('chacun consacre la même part de son revenu', () => {
+      const rows = simulateCommonSplit(budget, members, balancedCommonWeights(budget, members, 'income'));
+      expect(rows[0].common).toBeCloseTo(1200, 8);
+      expect(rows[1].common).toBeCloseTo(800, 8);
+      expect(balanceSpread(rows, 'income')).toBeCloseTo(0, 8);
+    });
+
+    it('sans revenu, parts égales', () => {
+      const sansRevenu = [tx({ id: 'c', amount: 2000, member_id: null })];
+      expect([...balancedCommonWeights(sansRevenu, members, 'income').values()]).toEqual([50, 50]);
+    });
+  });
+
+  describe('retrouver la règle appliquée', () => {
+    /** Ce qu'écrit l'action `balanceCommon` : les parts, en base 10 000, sur chaque ligne commune. */
+    const applied = (lines: Transaction[], rule: BalanceMode) => {
+      const weights = balancedCommonWeights(lines, members, rule);
+      const splits = members.map((m) => ({
+        transaction_id: 't',
+        member_id: m.id,
+        weight: Math.round((weights.get(m.id) ?? 0) * 100)
+      }));
+      return lines.map((t) => (t.kind === 'expense' && t.member_id === null ? { ...t, splits } : t));
+    };
+
+    it.each(['common', 'total', 'income'] as BalanceMode[])('reconnaît la règle %s', (rule) => {
+      expect(detectBalanceChoice(applied(budget, rule), members)).toBe(rule);
+    });
+
+    it('une répartition qu\'aucune règle n\'explique est libre', () => {
+      // Parts égales implicites, alors que revenus et personnel diffèrent.
+      expect(detectBalanceChoice(budget, members)).toBe('free');
+    });
+
+    it('si les montants ont bougé depuis, la règle ne tient plus : libre', () => {
+      const lignes = applied(budget, 'common').map((t) => (t.id === 'rj' ? { ...t, amount: 5000 } : t));
+      expect(detectBalanceChoice(lignes, members)).toBe('free');
+    });
+
+    it('lit la répartition en vigueur, toutes lignes communes confondues', () => {
+      const weights = appliedCommonWeights(applied(budget, 'income'), members);
+      expect(weights.get('g')).toBeCloseTo(60, 8);
+      expect(weights.get('i')).toBeCloseTo(40, 8);
+    });
+  });
+
+  it('mesure l\'écart de ce que la règle égalise', () => {
+    const rows = simulateCommonSplit(budget, members, new Map([['g', 50], ['i', 50]]));
+    // 1000 chacun : après commun 5000 / 3000, restes 4200 / 2800, effort 16,7 % / 25 %.
+    expect(balanceSpread(rows, 'common')).toBeCloseTo(2000, 8);
+    expect(balanceSpread(rows, 'total')).toBeCloseTo(1400, 8);
+    expect(balanceSpread(rows, 'income')).toBeCloseTo(25 - 100 / 6, 8);
   });
 });
 

@@ -1,12 +1,16 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import Field from '$lib/components/Field.svelte';
+  import Spinner from '$lib/components/Spinner.svelte';
   import { COLOR_PRESETS } from '$lib/budget/colors';
   import {
+    appliedCommonWeights,
+    balanceSpread,
     balancedCommonWeights,
     commonTotal,
-    memberBreakdown,
-    simulateCommonSplit
+    detectBalanceChoice,
+    simulateCommonSplit,
+    type BalanceChoice
   } from '$lib/budget/calc';
   import { money, pct } from '$lib/format';
   import { categoryTree, memberStatus } from '$lib/types';
@@ -28,40 +32,71 @@
 
   const common = $derived(commonTotal(data.transactions));
 
-  /** La répartition réellement en vigueur, en % — le point de départ du curseur. */
-  function currentParts(): Record<string, number> {
-    const total = commonTotal(data.transactions);
-    if (total <= 0 || data.members.length === 0) {
-      return Object.fromEntries(data.members.map((m) => [m.id, 100 / data.members.length]));
-    }
-    return Object.fromEntries(
-      data.members.map((m) => [
-        m.id,
-        (memberBreakdown(data.transactions, m, data.members).common / total) * 100
-      ])
-    );
-  }
+  const toRecord = (weights: Map<string, number>) =>
+    Object.fromEntries(data.members.map((m) => [m.id, weights.get(m.id) ?? 0]));
 
   /**
    * La répartition en base, recalculée quand les données changent : après
    * l'enregistrement, `parts` la rejoint et le bouton redevient inerte. Figée à
    * l'initialisation, elle laissait « Appliquer » actif sur un budget déjà à jour.
    */
-  const initial = $derived(currentParts());
+  const applied = () => toRecord(appliedCommonWeights(data.transactions, data.members));
+  const initial = $derived(applied());
+
+  /**
+   * La règle choisie. Elle n'est pas stockée : à l'ouverture, on la retrouve en
+   * reconnaissant la répartition en vigueur (`detectBalanceChoice`), et une
+   * répartition qu'aucune règle n'explique s'ouvre en mode libre.
+   */
+  const detected = () => detectBalanceChoice(data.transactions, data.members);
+  let mode = $state<BalanceChoice>(detected());
+  /** Les parts posées au curseur — ne servent qu'en mode libre. */
+  let freeParts = $state<Record<string, number>>(applied());
+
   /** Simulation seule : rien de tout ceci n'atteint la base avant « Appliquer ». */
-  let parts = $state<Record<string, number>>(currentParts());
+  const parts = $derived(
+    mode === 'free'
+      ? freeParts
+      : toRecord(balancedCommonWeights(data.transactions, data.members, mode))
+  );
 
   const rows = $derived(
     simulateCommonSplit(data.transactions, data.members, new Map(Object.entries(parts)))
   );
-  /** Écart entre le reste le plus haut et le plus bas — ce qu'on cherche à annuler. */
-  const spread = $derived(
-    rows.length < 2
-      ? 0
-      : Math.max(...rows.map((r) => r.remaining)) - Math.min(...rows.map((r) => r.remaining))
-  );
+
+  const MODES: { value: BalanceChoice; label: string; hint: string; gap: string }[] = [
+    {
+      value: 'common',
+      label: 'Même reste après le commun',
+      hint: 'Chacun garde la même somme une fois le commun payé ; ses dépenses personnelles viennent ensuite, à sa charge.',
+      gap: 'Écart après le commun'
+    },
+    {
+      value: 'total',
+      label: 'Même reste à la fin',
+      hint: 'Chacun garde la même somme une fois tout payé : qui dépense plus pour lui-même porte moins de commun.',
+      gap: 'Écart entre les restes'
+    },
+    {
+      value: 'income',
+      label: 'Au prorata des revenus',
+      hint: 'Chacun consacre au commun la même part de son revenu.',
+      gap: 'Écart d’effort'
+    },
+    {
+      value: 'free',
+      label: 'Libre',
+      hint: 'Placez vous-même la répartition au curseur.',
+      gap: 'Écart entre les restes'
+    }
+  ];
+  const active = $derived(MODES.find((m) => m.value === mode)!);
+
+  /** Écart de ce que la règle cherche à égaliser — zéro quand elle est tenue. */
+  const spread = $derived(balanceSpread(rows, mode));
+  // Les parts s'écrivent au centième de pourcent : en deçà, c'est l'arrondi, pas un changement.
   const dirty = $derived(
-    data.members.some((m) => Math.abs((parts[m.id] ?? 0) - (initial[m.id] ?? 0)) > 0.005)
+    data.members.some((m) => Math.abs((parts[m.id] ?? 0) - (initial[m.id] ?? 0)) > 0.02)
   );
 
   /**
@@ -76,14 +111,18 @@
     }))
   );
 
-  function equalise() {
-    const weights = balancedCommonWeights(data.transactions, data.members);
-    parts = Object.fromEntries(data.members.map((m) => [m.id, weights.get(m.id) ?? 0]));
+  /** Écriture en cours : bouton inerte, un second clic referait table rase pour rien. */
+  let applying = $state(false);
+
+  /** Passer en libre part de ce qu'on voyait : le curseur reste où la règle l'avait mis. */
+  function choose(next: BalanceChoice) {
+    if (next === 'free' && mode !== 'free') freeParts = { ...parts };
+    mode = next;
   }
 
   function setSlider(value: number) {
     const [a, b] = data.members;
-    parts = { ...parts, [a.id]: value, [b.id]: 100 - value };
+    freeParts = { ...freeParts, [a.id]: value, [b.id]: 100 - value };
   }
 
   const sliderValue = $derived(Math.round(parts[data.members[0]?.id] ?? 50));
@@ -200,8 +239,8 @@
       Équilibrer les dépenses communes
     </h2>
     <p class="mt-2 mb-4 text-[12px] text-muted">
-      Bougez le curseur pour voir, en direct, ce qu'il resterait à chacun une fois le commun et le
-      personnel payés. <b>Rien n'est enregistré tant que vous n'appliquez pas</b> — et appliquer
+      Choisissez une règle, ou placez le curseur vous-même en mode libre : le reste de chacun se
+      recalcule en direct. <b>Rien n'est enregistré tant que vous n'appliquez pas</b> — et appliquer
       remplace la répartition de toutes les lignes communes, y compris celles réglées à la main.
     </p>
 
@@ -215,6 +254,30 @@
         « Concerné » vaut <b>Commun</b>.
       </p>
     {:else}
+      <div
+        role="radiogroup"
+        aria-label="Règle de répartition"
+        class="grid grid-cols-4 gap-0.5 rounded-control border border-line bg-bg p-0.5 max-sm:grid-cols-2"
+      >
+        {#each MODES as option (option.value)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === option.value}
+            class="min-h-[40px] rounded-[4px] border-0 px-2 py-1.5 text-[12px] leading-tight max-sm:min-h-[44px] {mode ===
+            option.value
+              ? 'bg-panel font-bold text-deep shadow-sm'
+              : 'bg-transparent text-muted hover:text-fg'}"
+            onclick={() => choose(option.value)}
+          >
+            {option.label}
+          </button>
+        {/each}
+      </div>
+      <p class="mt-2 mb-3 text-[12px] text-muted">{active.hint}</p>
+
+      <!-- Hors mode libre, le curseur montre ce que la règle calcule sans se laisser
+           déplacer : on lit la règle, on ne la contredit pas. -->
       <div class="rounded-control border border-line bg-bg p-4">
         <div class="flex items-center justify-between text-[12px]">
           <span class="text-muted">À répartir</span>
@@ -231,8 +294,9 @@
               type="range"
               min="0"
               max="100"
-              class="min-w-0 flex-1 accent-deep"
+              class="min-w-0 flex-1 accent-deep disabled:opacity-50"
               value={sliderValue}
+              disabled={mode !== 'free'}
               aria-label="Part de {data.members[0].display_name} dans les dépenses communes"
               oninput={(e) => setSlider(Number(e.currentTarget.value))}
             />
@@ -253,10 +317,14 @@
                 <input
                   type="number"
                   min="0"
-                  class="num w-[62px] rounded border border-line bg-panel px-1.5 py-1 text-right outline-none focus:border-green"
+                  class="num w-[62px] rounded border border-line bg-panel px-1.5 py-1 text-right outline-none focus:border-green disabled:opacity-50"
                   value={Math.round(parts[member.id] ?? 0)}
+                  disabled={mode !== 'free'}
                   onchange={(e) =>
-                    (parts = { ...parts, [member.id]: Math.max(Number(e.currentTarget.value) || 0, 0) })}
+                    (freeParts = {
+                      ...freeParts,
+                      [member.id]: Math.max(Number(e.currentTarget.value) || 0, 0)
+                    })}
                 />
               </label>
             {/each}
@@ -273,6 +341,9 @@
             <th class="py-1.5 text-right font-semibold max-sm:hidden">Revenu</th>
             <th class="py-1.5 text-right font-semibold max-sm:hidden">Personnel</th>
             <th class="py-1.5 text-right font-semibold">Part du commun</th>
+            <th class="py-1.5 text-right font-semibold {mode === 'common' ? '' : 'max-sm:hidden'}">
+              Après commun
+            </th>
             <th class="py-1.5 text-right font-semibold">Reste</th>
           </tr>
         </thead>
@@ -284,9 +355,19 @@
               <td class="num py-2 text-right whitespace-nowrap text-muted max-sm:hidden">−{money(row.personal)}</td>
               <td class="num py-2 text-right whitespace-nowrap text-muted">
                 −{money(row.common)}
-                <small class="ml-1 text-[10px]">
-                  {pct(common > 0 ? (row.common / common) * 100 : 0)}
+                <!-- Au prorata, c'est la part du revenu qui doit être la même pour tous. -->
+                <small class="ml-1 text-[10px] {mode === 'income' ? 'font-bold text-deep' : ''}">
+                  {#if mode === 'income'}
+                    {pct(row.income > 0 ? (row.common / row.income) * 100 : 0)} du revenu
+                  {:else}
+                    {pct(common > 0 ? (row.common / common) * 100 : 0)}
+                  {/if}
                 </small>
+              </td>
+              <td class="num py-2 text-right whitespace-nowrap {mode === 'common'
+                ? 'font-bold ' + (row.afterCommon < 0 ? 'text-danger' : 'text-deep')
+                : 'text-muted max-sm:hidden'}">
+                {money(row.afterCommon)}
               </td>
               <td class="num py-2 text-right font-serif text-[16px] font-medium whitespace-nowrap {row.remaining < 0
                 ? 'text-danger'
@@ -304,26 +385,36 @@
             ? 'border-[#bcebd5] bg-pale text-deep'
             : 'border-line bg-bg text-muted'}"
         >
-          Écart entre les restes <b class="num ml-1">{money(spread)}</b>
+          {active.gap}
+          <b class="num ml-1">{mode === 'income' ? `${Math.round(spread)} pts` : money(spread)}</b>
         </span>
 
-        <button
-          type="button"
-          class="rounded-control border border-line px-3.5 py-2.5 text-[12px] font-medium hover:bg-bg max-sm:min-h-[44px] max-sm:flex-1"
-          onclick={equalise}
-        >
-          Égaliser les restes
-        </button>
-
-        <form method="POST" action="?/balanceCommon" use:enhance class="ml-auto flex items-center gap-3 max-sm:w-full">
+        <form
+          method="POST"
+          action="?/balanceCommon"
+          use:enhance={() => {
+            applying = true;
+            return async ({ update }) => {
+              await update();
+              applying = false;
+            };
+          }}
+          class="ml-auto flex items-center gap-3 max-sm:w-full">
           {#each submitted as part (part.id)}
             <input type="hidden" name="part_{part.id}" value={part.part} />
           {/each}
           <button
-            disabled={!dirty}
-            class="rounded-control bg-green px-3.5 py-2.5 font-bold text-[#143b2b] hover:brightness-96 disabled:opacity-40 max-sm:min-h-[44px] max-sm:w-full"
+            disabled={!dirty || applying}
+            aria-busy={applying}
+            class="inline-flex items-center justify-center gap-2 rounded-control bg-green px-3.5 py-2.5 font-bold text-[#143b2b] hover:brightness-96 max-sm:min-h-[44px] max-sm:w-full {applying
+              ? 'disabled:opacity-60'
+              : 'disabled:opacity-40'}"
           >
-            Appliquer à {data.transactions.filter((t) => t.kind === 'expense' && t.member_id === null).length} lignes
+            {#if applying}
+              <Spinner />Application…
+            {:else}
+              Appliquer à {data.transactions.filter((t) => t.kind === 'expense' && t.member_id === null).length} lignes
+            {/if}
           </button>
         </form>
       </div>

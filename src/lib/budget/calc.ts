@@ -229,8 +229,18 @@ export interface BalanceRow {
   personal: number;
   /** Part des dépenses communes qui lui reviendrait avec la répartition simulée. */
   common: number;
+  /** Revenu moins sa part du commun, avant ses dépenses personnelles. */
+  afterCommon: number;
   remaining: number;
 }
+
+/**
+ * La règle d'équilibrage du commun :
+ * - `common` : même reste une fois le commun payé, le personnel venant ensuite ;
+ * - `total`  : même reste une fois **tout** payé, commun et personnel ;
+ * - `income` : chacun consacre la même part de son revenu au commun.
+ */
+export type BalanceMode = 'common' | 'total' | 'income';
 
 /** Revenu moins dépenses personnelles : ce dont le membre dispose pour le commun. */
 function availableFor(
@@ -276,16 +286,27 @@ export function simulateCommonSplit(
     const part =
       total > 0 ? Math.max(weights.get(member.id) ?? 0, 0) / total : 1 / Math.max(members.length, 1);
     const share = common * part;
-    return { member, income, personal, common: share, remaining: income - share - personal };
+    return {
+      member,
+      income,
+      personal,
+      common: share,
+      afterCommon: income - share,
+      remaining: income - share - personal
+    };
   });
 }
 
 /**
- * La répartition des dépenses communes qui **égalise le reste de chacun**.
+ * La répartition des dépenses communes selon la règle choisie (`BalanceMode`),
+ * en pourcentages qui totalisent 100.
  *
- * `reste_i = (revenu_i − perso_i) − part_i`, et les parts totalisent le commun.
- * Les rendre tous égaux à R donne `R = (Σ disponible_i − commun) / n`, puis
- * `part_i = disponible_i − R`.
+ * `income` : au prorata des revenus (`incomeWeights`), parts égales sans revenu.
+ *
+ * `common` et `total` égalisent un reste : `reste_i = disponible_i − part_i`,
+ * où le disponible vaut le revenu (`common`) ou le revenu moins le personnel
+ * (`total`), et les parts totalisent le commun. Les rendre tous égaux à R donne
+ * `R = (Σ disponible_i − commun) / n`, puis `part_i = disponible_i − R`.
  *
  * Un membre dont le disponible est inférieur à R devrait recevoir une part
  * négative, c'est-à-dire être payé par les autres. On le met à zéro et on
@@ -294,16 +315,23 @@ export function simulateCommonSplit(
  */
 export function balancedCommonWeights(
   transactions: Transaction[],
-  members: BudgetMember[]
+  members: BudgetMember[],
+  mode: BalanceMode = 'total'
 ): Map<string, number> {
   const equal = new Map(members.map((m) => [m.id, members.length ? 100 / members.length : 0]));
   const common = commonTotal(transactions);
   if (members.length === 0 || common <= 0) return equal;
 
+  if (mode === 'income') {
+    const byIncome = incomeWeights(transactions, members);
+    if (!byIncome) return equal;
+    return new Map(members.map((m) => [m.id, (byIncome.get(m.id) ?? 0) / 100]));
+  }
+
   const available = new Map(
     members.map((m) => {
       const { income, personal } = availableFor(transactions, m, members);
-      return [m.id, income - personal];
+      return [m.id, mode === 'total' ? income - personal : income];
     })
   );
 
@@ -324,6 +352,64 @@ export function balancedCommonWeights(
     excluded.add(worst.id);
   }
   return equal;
+}
+
+/** Une règle de calcul, ou `free` : les parts posées à la main au curseur. */
+export type BalanceChoice = BalanceMode | 'free';
+
+/**
+ * La répartition du commun réellement en vigueur, en % : la part de chacun dans
+ * le total commun, toutes lignes confondues. Parts égales sans commun.
+ */
+export function appliedCommonWeights(
+  transactions: Transaction[],
+  members: BudgetMember[]
+): Map<string, number> {
+  const total = commonTotal(transactions);
+  if (total <= 0 || members.length === 0) {
+    return new Map(members.map((m) => [m.id, members.length ? 100 / members.length : 0]));
+  }
+  return new Map(
+    members.map((m) => [m.id, (memberBreakdown(transactions, m, members).common / total) * 100])
+  );
+}
+
+/**
+ * La règle que suit la répartition en vigueur, retrouvée en recalculant chacune.
+ * C'est ce qui permet de rouvrir l'écran sur la règle choisie **sans la
+ * stocker** : seules les parts sont en base, et elles suffisent à la reconnaître.
+ *
+ * Les parts sont écrites au centième de pourcent : la tolérance couvre cet
+ * arrondi, rien de plus. Si les montants ont bougé depuis, plus aucune règle ne
+ * tombe juste et l'on retombe sur `free` — ce qui est exact : la répartition
+ * appliquée ne suit plus la règle. Quand plusieurs règles coïncident (revenus
+ * égaux, aucun personnel), la première de `rules` l'emporte, et ses parts sont
+ * de toute façon les mêmes.
+ */
+export function detectBalanceChoice(
+  transactions: Transaction[],
+  members: BudgetMember[],
+  rules: BalanceMode[] = ['common', 'total', 'income']
+): BalanceChoice {
+  const applied = appliedCommonWeights(transactions, members);
+  const close = (a: Map<string, number>) =>
+    members.every((m) => Math.abs((a.get(m.id) ?? 0) - (applied.get(m.id) ?? 0)) < 0.02);
+  return rules.find((rule) => close(balancedCommonWeights(transactions, members, rule))) ?? 'free';
+}
+
+/**
+ * Écart, entre membres, de ce que la règle cherche à égaliser : le reste après
+ * le commun (`common`), le reste final (`total`, et `free` qui ne vise rien), ou la part du revenu
+ * consacrée au commun, en points de pourcentage (`income`). Zéro = règle tenue.
+ * Un membre sans revenu n'a pas d'effort mesurable : il sort du calcul en `income`.
+ */
+export function balanceSpread(rows: BalanceRow[], mode: BalanceChoice): number {
+  const values =
+    mode === 'income'
+      ? rows.filter((r) => r.income > 0).map((r) => (r.common / r.income) * 100)
+      : rows.map((r) => (mode === 'common' ? r.afterCommon : r.remaining));
+  if (values.length < 2) return 0;
+  return Math.max(...values) - Math.min(...values);
 }
 
 /**

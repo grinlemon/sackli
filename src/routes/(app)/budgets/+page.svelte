@@ -1,9 +1,12 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import Field from '$lib/components/Field.svelte';
+  import Spinner from '$lib/components/Spinner.svelte';
 
   let { data, form } = $props();
   let panel = $state<'create' | 'import' | null>(null);
+  /** Création en cours : le bouton reste inerte, un second clic créerait un second budget. */
+  let creating = $state(false);
 </script>
 
 <svelte:head><title>Mes budgets — säckli</title></svelte:head>
@@ -38,7 +41,13 @@
     <form
       method="POST"
       action="?/create"
-      use:enhance
+      use:enhance={() => {
+        creating = true;
+        return async ({ update }) => {
+          await update();
+          creating = false;
+        };
+      }}
       class="mb-4 max-w-[520px] rounded-card border border-line bg-panel p-5"
     >
       <h2 class="m-0 mb-4 font-serif text-[19px] font-medium text-[#34433d]">Nouveau budget</h2>
@@ -54,8 +63,12 @@
         <input type="checkbox" name="seed" class="accent-deep" checked />
         Pré-remplir avec les lignes courantes d'un ménage (montants à zéro)
       </label>
-      <button class="rounded-control bg-green px-3.5 py-2.5 font-bold text-[#143b2b] hover:brightness-96">
-        Créer le budget
+      <button
+        disabled={creating}
+        aria-busy={creating}
+        class="inline-flex items-center gap-2 rounded-control bg-green px-3.5 py-2.5 font-bold text-[#143b2b] hover:brightness-96 disabled:opacity-60"
+      >
+        {#if creating}<Spinner />Création…{:else}Créer le budget{/if}
       </button>
     </form>
   {/if}

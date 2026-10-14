@@ -16,6 +16,7 @@
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import { afterNavigate } from '$app/navigation';
+  import BudgetSwitcher, { type SwitcherBudget } from './BudgetSwitcher.svelte';
   import Chevron from './Chevron.svelte';
   import Logo from './Logo.svelte';
   import NavIcon from './NavIcon.svelte';
@@ -32,13 +33,18 @@
     budgetName: string | null;
     /** Où mènent la marque et le sélecteur de budget. */
     home: { href: string; label: string; title: string };
+    /**
+     * Les budgets entre lesquels passer : le sélecteur devient un menu. Absent
+     * (la démo n'a qu'un budget), il reste un simple lien vers `home`.
+     */
+    switcher?: { budgets: SwitcherBudget[]; currentId: string | null };
     /** Pied de la barre latérale (bureau). */
     account: Snippet;
     /** À droite du bandeau mobile. */
     mobileAccount: Snippet;
     children: Snippet;
   }
-  let { links, budgetName, home, account, mobileAccount, children }: Props = $props();
+  let { links, budgetName, home, switcher, account, mobileAccount, children }: Props = $props();
 
   // <main> est le conteneur de scroll et survit aux navigations ; SvelteKit ne
   // réinitialise que celui du document, donc on le fait nous-mêmes.
@@ -64,8 +70,11 @@
       <span class="sm:hidden"><Logo wordmark={false} /></span>
     </a>
 
-    <!-- Mobile : le budget courant, qui ramène à la liste — le seul repère
-         « où suis-je » une fois la barre latérale partie. -->
+    <!-- Mobile : le budget courant — le seul repère « où suis-je » une fois la
+         barre latérale partie, et le moyen d'en changer. -->
+    {#if switcher}
+      <BudgetSwitcher {...switcher} {home} variant="mobile" />
+    {:else}
     <a
       href={home.href}
       class="flex min-h-[40px] min-w-0 flex-1 items-center gap-1.5 rounded-control px-2 text-[15px] font-semibold sm:hidden"
@@ -73,8 +82,12 @@
       <span class="truncate">{budgetName ?? home.label}</span>
       {#if budgetName}<span class="text-muted"><Chevron /></span>{/if}
     </a>
+    {/if}
     {@render mobileAccount()}
 
+    {#if switcher}
+      <BudgetSwitcher {...switcher} {home} variant="sidebar" />
+    {:else}
     <a
       href={home.href}
       class="group flex items-center gap-2 rounded-control border border-line p-2.5 text-[12px] text-[#3d4541] transition-colors hover:border-[#bcebd5] hover:bg-bg max-sm:hidden"
@@ -84,6 +97,7 @@
       <span class="truncate">{budgetName ?? home.label}</span>
       <span class="ml-auto text-muted transition-colors group-hover:text-deep"><Chevron /></span>
     </a>
+    {/if}
 
     <nav class="mt-6 flex flex-col gap-0.5 max-sm:hidden">
       {#each links as link (link.href)}

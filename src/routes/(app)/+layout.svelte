@@ -16,6 +16,16 @@
   const currentBudget = $derived(data.budgets.find((b) => b.id === page.params.id) ?? null);
   const base = $derived(currentBudget ? `/budgets/${currentBudget.id}` : null);
 
+  /**
+   * Changer de budget garde la page en cours : depuis l'Analyse de l'un, on
+   * arrive sur l'Analyse de l'autre. Hors d'un budget, on ouvre sa grille.
+   */
+  const section = $derived(base ? page.url.pathname.slice(base.length) : '');
+  const switcher = $derived({
+    currentId: currentBudget?.id ?? null,
+    budgets: data.budgets.map((b) => ({ id: b.id, name: b.name, href: `/budgets/${b.id}${section}` }))
+  });
+
   const links: ShellLink[] = $derived(
     base
       ? [
@@ -32,6 +42,7 @@
   {links}
   budgetName={currentBudget?.name ?? null}
   home={{ href: '/budgets', label: 'Mes budgets', title: 'Changer de budget' }}
+  {switcher}
 >
   {#snippet mobileAccount()}
     <!-- L'avatar mène au compte, qui porte la déconnexion : un toucher sur
