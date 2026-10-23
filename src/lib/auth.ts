@@ -38,6 +38,24 @@ export function emailRedirect(origin: string, next: '/budgets' | '/reset-passwor
   return `${origin}/auth/confirm?next=${encodeURIComponent(next)}`;
 }
 
+/**
+ * Code reçu par email, tel que collé : les clients mail l'affichent parfois
+ * groupé (« 123 456 »). Null si ce n'est pas un code — 6 chiffres par défaut,
+ * jusqu'à 10 selon `otp_length` du projet.
+ */
+export function otpCode(input: string): string | null {
+  const code = input.replace(/[\s-]/g, '');
+  return /^\d{6,10}$/.test(code) ? code : null;
+}
+
+/** URL de l'étape « vérifiez vos emails », qui garde l'adresse et la destination. */
+export function verifyUrl(email: string, opts: { next?: string | null; sent?: boolean } = {}): string {
+  const params = new URLSearchParams({ email });
+  if (opts.next) params.set('next', safeNext(opts.next));
+  if (opts.sent) params.set('sent', '1');
+  return `/verify?${params}`;
+}
+
 /** Où mène un lien d'email une fois vérifié : un lien de récupération n'a de sens que vers le nouveau mot de passe. */
 export function landingFor(type: EmailOtpType | null, next: string | null): string {
   if (type === 'recovery') return '/reset-password';
@@ -58,6 +76,9 @@ export function authMessage(error: Pick<AuthError, 'code' | 'message'>): string 
     // prod sans SMTP externe, tout autre destinataire est refusé.
     case 'email_address_not_authorized':
       return "L'envoi d'emails vers cette adresse n'est pas encore possible. Contactez-nous, ou réessayez plus tard.";
+    // Supabase rend le même code pour un code faux et un code périmé.
+    case 'otp_expired':
+      return 'Code incorrect ou expiré. Vérifiez le dernier email reçu, ou demandez un nouveau code.';
     case 'weak_password':
       return `Mot de passe trop faible : ${MIN_PASSWORD} caractères minimum.`;
     case 'same_password':
@@ -70,6 +91,10 @@ export function authMessage(error: Pick<AuthError, 'code' | 'message'>): string 
     case 'signup_disabled':
       return 'Les inscriptions sont fermées.';
     default:
+      // Échec SMTP côté Supabase : pas de code dédié, seulement ce message.
+      if (/error sending .*email/i.test(error.message)) {
+        return "L'email n'a pas pu partir. Réessayez dans quelques minutes.";
+      }
       return error.message;
   }
 }

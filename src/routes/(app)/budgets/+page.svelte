@@ -7,6 +7,9 @@
   let panel = $state<'create' | 'import' | null>(null);
   /** Création en cours : le bouton reste inerte, un second clic créerait un second budget. */
   let creating = $state(false);
+  /** Premier passage : pas de page vide à interpréter, le formulaire est la page. */
+  const first = $derived(data.budgets.length === 0);
+  const showCreate = $derived(panel === 'create' || (first && panel !== 'import'));
 </script>
 
 <svelte:head><title>Mes budgets — säckli</title></svelte:head>
@@ -23,12 +26,14 @@
     >
       {panel === 'import' ? 'Annuler' : 'Importer'}
     </button>
-    <button
-      class="rounded-control bg-green px-3.5 py-2.5 font-bold text-[#143b2b] hover:brightness-96"
-      onclick={() => (panel = panel === 'create' ? null : 'create')}
-    >
-      {panel === 'create' ? 'Annuler' : '＋ Nouveau budget'}
-    </button>
+    {#if !first}
+      <button
+        class="rounded-control bg-green px-3.5 py-2.5 font-bold text-[#143b2b] hover:brightness-96"
+        onclick={() => (panel = panel === 'create' ? null : 'create')}
+      >
+        {panel === 'create' ? 'Annuler' : '＋ Nouveau budget'}
+      </button>
+    {/if}
   </div>
 </header>
 
@@ -37,7 +42,7 @@
     <p class="mb-4 rounded-control border border-[#f0d5d3] bg-[#fdf3f2] px-3 py-2.5 text-[12px] text-danger">{form.error}</p>
   {/if}
 
-  {#if panel === 'create'}
+  {#if showCreate}
     <form
       method="POST"
       action="?/create"
@@ -50,14 +55,21 @@
       }}
       class="mb-4 max-w-[520px] rounded-card border border-line bg-panel p-5"
     >
-      <h2 class="m-0 mb-4 font-serif text-[19px] font-medium text-[#34433d]">Nouveau budget</h2>
-      <Field label="Nom du budget" name="name" required placeholder="Budget familial" />
+      {#if first}
+        <h2 class="m-0 mb-1.5 font-serif text-[19px] font-medium text-[#34433d]">Bienvenue{data.displayName ? `, ${data.displayName}` : ''}</h2>
+        <p class="m-0 mb-4 text-[12px] text-muted">
+          Créez votre premier budget : un nom suffit. Membres, lignes et catégories se modifient ensuite.
+        </p>
+      {:else}
+        <h2 class="m-0 mb-4 font-serif text-[19px] font-medium text-[#34433d]">Nouveau budget</h2>
+      {/if}
+      <Field label="Nom du budget" name="name" required value={first ? 'Mon budget' : ''} placeholder="Budget familial" />
       <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
-        <Field label="Deuxième membre" name="partner_name" placeholder="Sam" />
-        <Field label="Son email (optionnel)" name="partner_email" type="email" placeholder="ilona@exemple.ch" />
+        <Field label="À deux ? Son prénom (optionnel)" name="partner_name" placeholder="Sam" />
+        <Field label="Son email (optionnel)" name="partner_email" type="email" placeholder="sam@exemple.ch" />
       </div>
       <p class="-mt-2 mb-4 text-[11px] text-muted">
-        Sans email, le membre existe quand même dans les calculs — vous pourrez le rattacher à un compte plus tard.
+        Avec son email, cette personne retrouvera le budget en créant son compte. Sans, elle compte quand même dans les calculs.
       </p>
       <label class="mb-4 flex items-center gap-2 text-[12px] text-[#3d4541]">
         <input type="checkbox" name="seed" class="accent-deep" checked />
@@ -103,11 +115,10 @@
     </form>
   {/if}
 
-  {#if data.budgets.length === 0}
-    <div class="grid place-items-center rounded-card border border-dashed border-line bg-panel px-6 py-16 text-center">
-      <p class="m-0 font-serif text-[17px] text-[#4e5752]">Aucun budget pour l'instant.</p>
-      <p class="mt-2 mb-0 text-[12px] text-muted">Créez-en un pour commencer à planifier le mois.</p>
-    </div>
+  {#if first}
+    {#if !showCreate}
+      <p class="m-0 text-[12px] text-muted">Aucun budget pour l'instant.</p>
+    {/if}
   {:else}
     <div class="grid grid-cols-3 gap-2.5 max-lg:grid-cols-2 max-sm:grid-cols-1">
       {#each data.budgets as budget (budget.id)}

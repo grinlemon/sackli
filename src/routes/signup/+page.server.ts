@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { MIN_PASSWORD, authMessage, emailRedirect } from '$lib/auth';
+import { MIN_PASSWORD, authMessage, emailRedirect, verifyUrl } from '$lib/auth';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -31,6 +31,15 @@ export const actions: Actions = {
 
     // Session immédiate = confirmation d'email désactivée sur le projet.
     if (data.session) redirect(303, '/budgets');
-    redirect(303, `/login?checkEmail=1&email=${encodeURIComponent(email)}`);
+
+    // Adresse déjà confirmée : Supabase ne le dit pas (pour ne pas révéler qui
+    // est inscrit), renvoie un utilisateur sans identité et n'envoie *aucun*
+    // email. Sans cette garde, on annonçait un email qui n'arriverait jamais.
+    if (data.user && data.user.identities?.length === 0) {
+      return fail(400, { email, displayName, exists: true, error: 'Un compte existe déjà avec cette adresse.' });
+    }
+
+    // Compte en attente : renvoyé ici, Supabase renvoie aussi le code.
+    redirect(303, verifyUrl(email, { sent: true }));
   }
 };
