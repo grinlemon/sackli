@@ -128,6 +128,10 @@ Tous les liens reviennent sur [/auth/confirm](src/routes/auth/confirm/+server.ts
 
 Le `redirectTo` vient d'`emailRedirect()` ([src/lib/auth.ts](src/lib/auth.ts)), construit sur `url.origin` : c'est le déploiement réel qui décide du retour, pas la Site URL. Il **porte toujours `?next=`**, et les templates comptent dessus en ajoutant `&token_hash=…`. Une URL absente des *Redirect URLs* du projet est remplacée en silence par la Site URL, ce qui casse le lien : d'où `/**` dans la liste, en local (`config.toml`) comme en prod.
 
+L'email de confirmation porte un lien **et** un code (`{{ .Token }}`), saisi sur [/verify](src/routes/verify/+page.server.ts) via `verifyOtp({ email, token, type: 'email' })`. Le code marche d'un appareil à l'autre et survit aux antivirus de messagerie qui « cliquent » les liens et consomment ainsi un jeton à usage unique. L'inscription comme une connexion refusée faute de confirmation mènent à cette étape, qui ouvre la session directement : pas de détour par la connexion. Une inscription sur une adresse déjà confirmée renvoie un utilisateur sans `identities` et **n'envoie rien** : l'action le détecte au lieu d'annoncer un email qui n'arrivera jamais.
+
+Sans budget, « Mes budgets » montre directement le formulaire de création, pré-rempli : pas de page vide à interpréter.
+
 Un lien de récupération mène toujours à [/reset-password](src/routes/reset-password/+page.server.ts), qui exige la session que le lien vient d'ouvrir. Tout `?next=` passe par `safeNext()` : `//ailleurs.com` est une autre origine pour le navigateur, et un lien de connexion ne doit pas servir de tremplin.
 
 Les templates de `supabase/templates/` ne valent **que pour le local** (`config.toml`). En prod, ils se collent à la main dans le dashboard (*Authentication → Emails*), sujets compris : les modifier ici sans les recoller laisse la prod sur l'ancienne version.

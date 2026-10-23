@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authMessage, emailRedirect, landingFor, retryAfter, safeNext } from './auth';
+import { authMessage, emailRedirect, landingFor, otpCode, retryAfter, safeNext, verifyUrl } from './auth';
 
 describe('safeNext', () => {
   it('laisse passer un chemin interne', () => {
@@ -54,5 +54,24 @@ describe('emailRedirect', () => {
   it('porte déjà une query string, à laquelle les templates ajoutent `&token_hash=`', () => {
     expect(emailRedirect('https://saeckli.vercel.app', '/reset-password'))
       .toBe('https://saeckli.vercel.app/auth/confirm?next=%2Freset-password');
+  });
+});
+
+describe('otpCode', () => {
+  it('accepte un code collé avec ses espaces', () => {
+    expect(otpCode(' 123 456 ')).toBe('123456');
+    expect(otpCode('123-456')).toBe('123456');
+  });
+
+  it("refuse ce qui n'est pas un code", () => {
+    for (const input of ['', '12345', 'abcdef', '12345678901']) expect(otpCode(input)).toBeNull();
+  });
+});
+
+describe('verifyUrl', () => {
+  it("garde l'adresse et une destination sûre", () => {
+    expect(verifyUrl('a+b@x.ch', { next: '//evil.com', sent: true }))
+      .toBe('/verify?email=a%2Bb%40x.ch&next=%2Fbudgets&sent=1');
+    expect(verifyUrl('a@x.ch')).toBe('/verify?email=a%40x.ch');
   });
 });

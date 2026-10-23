@@ -17,7 +17,7 @@
 
 <AuthCard
   title="Créer un compte"
-  subtitle="Un email, un mot de passe. Rien d'autre."
+  subtitle="Un email, un mot de passe : vous recevrez un code pour confirmer l'adresse."
   error={form?.error}
 >
   <form
@@ -30,7 +30,14 @@
       };
     }}
   >
-    <Field label="Nom affiché" name="display_name" value={form?.displayName ?? ''} placeholder="Alex" autocomplete="name" />
+    {#if form && 'exists' in form}
+      <p class="-mt-2 mb-4 text-[12px] text-muted">
+        <a href="/login?email={encodeURIComponent(form.email)}" class="font-medium text-deep underline">Se connecter</a>
+        ou
+        <a href="/forgot-password?email={encodeURIComponent(form.email)}" class="text-deep underline">réinitialiser le mot de passe</a>.
+      </p>
+    {/if}
+    <Field label="Prénom (optionnel)" name="display_name" value={form?.displayName ?? ''} placeholder="Alex" autocomplete="name" />
     <Field
       label="Email"
       name="email"

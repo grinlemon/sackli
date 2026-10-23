@@ -3,7 +3,13 @@ import type { EmailOtpType } from '@supabase/supabase-js';
 import { landingFor } from '$lib/auth';
 import type { RequestHandler } from './$types';
 
-const INVALID = 'Lien invalide ou expiré.';
+/**
+ * Un lien déjà « cliqué » par l'antivirus d'une messagerie arrive ici consommé,
+ * alors que l'adresse est bel et bien confirmée : se connecter suffit, et sinon
+ * la connexion mène au code.
+ */
+const INVALID = 'Ce lien a expiré ou a déjà servi. Connectez-vous : si votre adresse reste à confirmer, un nouveau code vous sera proposé.';
+const INVALID_RECOVERY = 'Lien invalide ou expiré.';
 
 /**
  * Point d'arrivée de tous les liens envoyés par email : confirmation
@@ -31,7 +37,9 @@ export const GET: RequestHandler = async ({ url, locals }) => {
       : { error: true };
 
   if (error) {
-    redirect(303, `${recovery ? '/forgot-password' : '/login'}?error=${encodeURIComponent(INVALID)}`);
+    redirect(303, recovery
+      ? `/forgot-password?error=${encodeURIComponent(INVALID_RECOVERY)}`
+      : `/login?error=${encodeURIComponent(INVALID)}`);
   }
   redirect(303, landingFor(recovery ? 'recovery' : type, next));
 };
